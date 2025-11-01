@@ -271,13 +271,6 @@ updateSegmentData(const UpdaterConfig &config,
                         auto new_weight = convertToWeight(
                             fwd_weights_range[segment_offset], modified_value, segment_length);
                         fwd_was_updated = true;
-                        const char* op_str = (value->operation == SpeedSource::MULTIPLY) ? "*" : 
-                                            (value->operation == SpeedSource::DIVIDE) ? "/" : "=";
-                        util::Log(logDEBUG) << "[FWD] Segment " << u << "->" << v 
-                                           << " (offset " << segment_offset << ", length " << segment_length << "m)"
-                                           << " | Old: weight=" << old_weight << ", duration=" << old_duration << ", speed=" << old_speed << " km/h"
-                                           << " | New: weight=" << new_weight << ", duration=" << new_duration
-                                           << ", speed=" << effective_speed << " km/h (op: " << op_str << value->speed << "), source=" << static_cast<int>(value->source);
 
                         fwd_weights_range[segment_offset] = new_weight;
                         fwd_durations_range[segment_offset] = new_duration;
@@ -348,13 +341,6 @@ updateSegmentData(const UpdaterConfig &config,
                         auto new_weight = convertToWeight(
                             rev_weights_range[segment_offset], modified_value, segment_length);
                         rev_was_updated = true;
-                        const char* op_str = (value->operation == SpeedSource::MULTIPLY) ? "*" : 
-                                            (value->operation == SpeedSource::DIVIDE) ? "/" : "=";
-                        util::Log(logDEBUG) << "[REV] Segment " << v << "->" << u 
-                                           << " (offset " << segment_offset << ", length " << segment_length << "m)"
-                                           << " | Old: weight=" << old_weight << ", duration=" << old_duration << ", speed=" << old_speed << " km/h"
-                                           << " | New: weight=" << new_weight << ", duration=" << new_duration
-                                           << ", speed=" << effective_speed << " km/h (op: " << op_str << value->speed << "), source=" << static_cast<int>(value->source);
 
                         rev_weights_range[segment_offset] = new_weight;
                         rev_durations_range[segment_offset] = new_duration;
