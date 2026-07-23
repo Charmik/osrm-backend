@@ -54,7 +54,10 @@ struct SpeedSource final
     {
         ABSOLUTE,  // Set absolute speed value
         MULTIPLY,  // Multiply current speed by factor
-        DIVIDE     // Divide current speed by factor
+        DIVIDE,    // Divide current speed by factor
+        LEVEL      // `speed` holds a level (1..5); the updater maps it to an absolute speed in
+                   // km/h via levelToSpeed(). Lets the caller pin a segment to a fixed speed by
+                   // level, independent of the profile's base speed.
     };
     
     SpeedSource() : speed(0.), rate(), operation(ABSOLUTE) {}

@@ -8,6 +8,7 @@
 #include <boost/spirit/home/x3.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -105,6 +106,20 @@ SegmentLookupTable readSegmentValues(const std::vector<std::string> &paths)
                     {
                         speed_source.operation = SpeedSource::DIVIDE;
                         speed_source.speed = std::stod(speed_str.substr(1));
+                    }
+                    else if (speed_str[0] == 'H' || speed_str[0] == 'h')
+                    {
+                        // Level token, e.g. "HG<level>" (also tolerates "HG <level>"): skip the
+                        // leading letters/whitespace and parse the trailing integer level (1..5).
+                        speed_source.operation = SpeedSource::LEVEL;
+                        std::size_t i = 0;
+                        while (i < speed_str.size() &&
+                               (std::isalpha(static_cast<unsigned char>(speed_str[i])) ||
+                                std::isspace(static_cast<unsigned char>(speed_str[i]))))
+                        {
+                            ++i;
+                        }
+                        speed_source.speed = std::stod(speed_str.substr(i));
                     }
                     else
                     {
