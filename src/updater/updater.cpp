@@ -55,13 +55,9 @@ template <typename T> inline bool is_aligned(const void *pointer)
     return reinterpret_cast<uintptr_t>(pointer) % alignof(T) == 0;
 }
 
-// Maps a level (1..5) to an absolute speed in km/h. Linear from 20 km/h at level 1 to 30 km/h at
-// level 5, so a segment tagged with a level is routed at a fixed speed no matter how slow the
-// profile's base speed is. Tune this curve here to re-weight level-tagged segments without
-// re-dumping the CSV.
 inline double levelToSpeed(double level)
 {
-    constexpr double MIN_SPEED = 20.0, MAX_SPEED = 30.0, MIN_LEVEL = 1.0, MAX_LEVEL = 5.0;
+    constexpr double MIN_SPEED = 20.0, MAX_SPEED = 38.0, MIN_LEVEL = 1.0, MAX_LEVEL = 5.0;
     const double clamped = std::clamp(level, MIN_LEVEL, MAX_LEVEL);
     return MIN_SPEED + (clamped - MIN_LEVEL) * (MAX_SPEED - MIN_SPEED) / (MAX_LEVEL - MIN_LEVEL);
 }
