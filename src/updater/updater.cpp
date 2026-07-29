@@ -57,7 +57,11 @@ template <typename T> inline bool is_aligned(const void *pointer)
 
 inline double levelToSpeed(double level)
 {
-    constexpr double MIN_SPEED = 20.0, MAX_SPEED = 38.0, MIN_LEVEL = 1.0, MAX_LEVEL = 5.0;
+    // Gravel-heatmap evidence level (HG1..HG5) -> absolute km/h. HG1 (20) = a ridden paved cycleway floor;
+    // HG5 (45) = most-ridden gravel, matched to gravel.lua GRAVEL_SPEED so the best heatmap gravel tops out
+    // at the same speed as a profile-preferred gravel road. Applied as a max() floor (never demotes), so a
+    // profile-45 gravel keeps 45 while an unknown-but-ridden track is lifted into this band.
+    constexpr double MIN_SPEED = 20.0, MAX_SPEED = 45.0, MIN_LEVEL = 1.0, MAX_LEVEL = 5.0;
     const double clamped = std::clamp(level, MIN_LEVEL, MAX_LEVEL);
     return MIN_SPEED + (clamped - MIN_LEVEL) * (MAX_SPEED - MIN_SPEED) / (MAX_LEVEL - MIN_LEVEL);
 }
@@ -272,7 +276,15 @@ updateSegmentData(const UpdaterConfig &config,
                         }
                         else if (value->operation == SpeedSource::LEVEL)
                         {
-                            effective_speed = levelToSpeed(value->speed);
+                            // A gravel-heatmap level is a FLOOR, not a replacement: it lifts an uncertain or
+                            // penalized gravel road toward the heatmap band, but must never LOWER a road below
+                            // the speed the profile already gave it. Otherwise a genuinely-good gravel road
+                            // (gravel.lua GRAVEL_SPEED 40) that also carries a heatmap would be demoted into the
+                            // 20-38 band — a heatmap-proven road ending up slower than an unproven one, and a
+                            // LOW-heatmap gravel road (HG1=20) merely tying a paved track. max() keeps good
+                            // gravel at 40 while still lifting the unknown/penalized cases and preserving the
+                            // paved-cycleway flat HG1 (profile ~15 -> max(15,20)=20).
+                            effective_speed = std::max(old_speed, levelToSpeed(value->speed));
                         }
                         // Create a modified SpeedSource with the effective speed for conversion functions
                         SpeedSource modified_value = *value;
@@ -345,7 +357,15 @@ updateSegmentData(const UpdaterConfig &config,
                         }
                         else if (value->operation == SpeedSource::LEVEL)
                         {
-                            effective_speed = levelToSpeed(value->speed);
+                            // A gravel-heatmap level is a FLOOR, not a replacement: it lifts an uncertain or
+                            // penalized gravel road toward the heatmap band, but must never LOWER a road below
+                            // the speed the profile already gave it. Otherwise a genuinely-good gravel road
+                            // (gravel.lua GRAVEL_SPEED 40) that also carries a heatmap would be demoted into the
+                            // 20-38 band — a heatmap-proven road ending up slower than an unproven one, and a
+                            // LOW-heatmap gravel road (HG1=20) merely tying a paved track. max() keeps good
+                            // gravel at 40 while still lifting the unknown/penalized cases and preserving the
+                            // paved-cycleway flat HG1 (profile ~15 -> max(15,20)=20).
+                            effective_speed = std::max(old_speed, levelToSpeed(value->speed));
                         }
                         
                         // Create a modified SpeedSource with the effective speed for conversion functions
