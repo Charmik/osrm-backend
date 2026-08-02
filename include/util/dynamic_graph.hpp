@@ -287,6 +287,7 @@ template <typename EdgeDataT> class DynamicGraph
                 node.first_edge--;
                 edge_list[node.first_edge] = edge_list[node.first_edge + node.edges];
             }
+
             else
             {
                 // we have to move this nodes edges to the end of the edge_list
