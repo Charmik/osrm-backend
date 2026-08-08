@@ -5,6 +5,8 @@
 #include "contractor/contractor_search.hpp"
 #include "contractor/graph_contractor_adaptors.hpp"
 #include "contractor/query_edge.hpp"
+#include "util/exception.hpp"
+#include "util/exception_utils.hpp"
 #include "util/integer_range.hpp"
 #include "util/log.hpp"
 #include "util/percent.hpp"
@@ -575,12 +577,85 @@ std::vector<bool> contractGraph(ContractorGraph &graph,
     util::UnbufferedLog log;
     util::Percent p(log, remaining_nodes.size());
 
+    // Diagnostics for the 2^32 EdgeIterator ceiling. Reported every 250M slots rather than every
+    // iteration because GetLiveEdgeCount() is a full scan of node_array. `live` is what the final
+    // CH has to fit into 32 bits; `tombstones` is the part a compaction pass could reclaim.
+    std::size_t next_size_report = 0;
+
+    // InsertEdge grows edge_list by relocating a node's edges to the end and dummying out the old
+    // slots, and nothing reclaims them mid-run: on planet-scale input the dead fraction reached 25%
+    // (3.22e9 live in 4.29e9 slots) and blew the 32-bit EdgeIterator at ~70% contracted. Renumber
+    // with an empty permutation compacts the edge list without touching node ids, so run it
+    // whenever the array gets close to the limit. Must stay outside the parallel sections below --
+    // it rewrites every first_edge.
+    //
+    // Trigger off the ceiling, not off a fixed size. A pass costs the same regardless of how much
+    // it frees (the work is proportional to edge_list.size()), so a threshold that sits just above
+    // the live edge count degenerates: it fires constantly and reclaims almost nothing. Measured on
+    // planet part1 with a fixed 3.5e9 threshold, reclaim fell 592M -> 97M and productive work
+    // between passes fell to 4 minutes per 21-minute pass. Anchoring the trigger to the limit keeps
+    // every pass worth its cost. The slack is ~6x the growth observed between reports and keeps us
+    // under Renumber's own 2^32 precondition.
+    constexpr std::size_t EDGE_LIST_LIMIT =
+        std::numeric_limits<ContractorGraph::EdgeIterator>::max();
+    constexpr std::size_t COMPACTION_SLACK = 300000000;
+    constexpr std::size_t EDGE_LIST_COMPACTION_THRESHOLD = EDGE_LIST_LIMIT - COMPACTION_SLACK;
+    std::size_t compaction_count = 0;
+
     // Algo 2: while Remaining Graph not Empty
     //
     // contract a chunk of nodes until a sufficient percentage of all nodes is
     // contracted
     while (remaining_nodes.size() > number_of_core_nodes)
     {
+        if (graph.GetEdgeListSize() >= next_size_report)
+        {
+            const auto slots = graph.GetEdgeListSize();
+            const auto live = graph.GetLiveEdgeCount();
+            util::Log() << "edge_list slots=" << slots << " live=" << live
+                        << " tombstones=" << (slots - live) << " remaining_nodes="
+                        << remaining_nodes.size() << " limit=4294967295";
+            next_size_report = slots + 250000000;
+        }
+
+        if (graph.GetEdgeListSize() >= EDGE_LIST_COMPACTION_THRESHOLD)
+        {
+            const auto slots_before = graph.GetEdgeListSize();
+            const auto live_before = graph.GetLiveEdgeCount();
+            util::Log() << "compacting edge_list #" << (compaction_count + 1) << ": slots="
+                        << slots_before << " live=" << live_before << " tombstones="
+                        << (slots_before - live_before) << " remaining_nodes="
+                        << remaining_nodes.size();
+            // Plain chrono rather than TIMER_START/STOP: those macros are shadowed in this
+            // translation unit by a variant using different generated names.
+            const auto compaction_started = std::chrono::steady_clock::now();
+            graph.Renumber(std::vector<NodeID>());
+            const auto compaction_elapsed_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - compaction_started)
+                    .count();
+            const auto slots_after = graph.GetEdgeListSize();
+            ++compaction_count;
+            util::Log() << "compacted edge_list #" << compaction_count << ": slots=" << slots_after
+                        << " reclaimed=" << (slots_before - slots_after) << " in "
+                        << compaction_elapsed_ms << "ms";
+            // After compaction slots_after == live edges, which is also what the finished CH has to
+            // fit into the 32-bit .osrm.hsgr. Compaction cannot shrink it. If it is still above the
+            // trigger there is nothing left to reclaim and every later iteration would compact for
+            // nothing, so fail now instead of grinding for days on a graph that cannot finish.
+            if (slots_after >= EDGE_LIST_COMPACTION_THRESHOLD)
+            {
+                throw util::exception(
+                    "compaction cannot free enough space: live edges (" +
+                    std::to_string(slots_after) + ") are within " +
+                    std::to_string(COMPACTION_SLACK) +
+                    " of the 2^32 edge limit and cannot be reduced further; this graph must be "
+                    "split into smaller parts" +
+                    SOURCE_REF);
+            }
+            next_size_report = slots_after;
+        }
+
         /** List of discovered independent nodes */
         tbb::concurrent_vector<NodeID> independent_nodes;
         /** List of new edges to insert into the graph */
@@ -672,6 +747,12 @@ std::vector<bool> contractGraph(ContractorGraph &graph,
     TIMER_START(renumber);
     graph.Renumber(std::vector<NodeID>());
     TIMER_STOP(renumber);
+
+    // Final live edge count is what gets serialised into the 32-bit .osrm.hsgr, so report it even
+    // on success -- it is the headroom left before this graph needs splitting.
+    util::Log() << "contraction finished: " << compaction_count << " mid-run compaction(s), final "
+                << "edge_list slots=" << graph.GetEdgeListSize()
+                << " live=" << graph.GetLiveEdgeCount() << " limit=4294967295";
 
     util::Log() << "node priorities initialized in " << TIMER_MSEC(init_priorities);
     util::Log() << "nodes contracted in " << TIMER_MSEC(contract);

@@ -223,6 +223,22 @@ template <typename EdgeDataT> class DynamicGraph
     unsigned GetNumberOfEdges() const { return number_of_edges; }
     auto GetEdgeCapacity() const { return edge_list.size(); }
 
+    // Diagnostics for the 32-bit EdgeIterator ceiling. edge_list.size() counts tombstoned slots
+    // as well as live edges and is what actually overflows; GetLiveEdgeCount() is the real edge
+    // count of the contracted graph. The gap between them is what a compaction pass reclaims.
+    // Both return size_t, unlike GetNumberOfEdges(), which is a 32-bit counter that wraps at
+    // exactly the point of interest.
+    std::size_t GetEdgeListSize() const { return edge_list.size(); }
+    std::size_t GetLiveEdgeCount() const
+    {
+        std::size_t total = 0;
+        for (const auto &node : node_array)
+        {
+            total += node.edges;
+        }
+        return total;
+    }
+
     unsigned GetOutDegree(const NodeIterator n) const { return node_array[n].edges; }
 
     unsigned GetDirectedOutDegree(const NodeIterator n) const
@@ -282,8 +298,20 @@ template <typename EdgeDataT> class DynamicGraph
             else
             {
                 // we have to move this nodes edges to the end of the edge_list
-                EdgeIterator newFirstEdge = (EdgeIterator)edge_list.size();
                 unsigned newSize = node.edges * 1.1 + 2;
+                // edge_list is indexed by a 32-bit EdgeIterator but sized by size_t. Past 2^32
+                // newFirstEdge below truncates and EndEdges() wraps, which surfaces later as
+                // either a SPECIAL_NODEID index or an inverted GetAdjacentEdgeRange (whose
+                // size() underflows to ~2^64 and throws length_error out of vector::reserve).
+                // Fail here instead, where the numbers still mean something.
+                if (edge_list.size() + newSize >= std::numeric_limits<EdgeIterator>::max())
+                {
+                    throw util::exception("There are too many edges, OSRM only supports 2^32"
+                                          " (slots=" + std::to_string(edge_list.size()) +
+                                          " live=" + std::to_string(GetLiveEdgeCount()) + ") " +
+                                          SOURCE_REF);
+                }
+                EdgeIterator newFirstEdge = (EdgeIterator)edge_list.size();
                 EdgeIterator requiredCapacity = newSize + edge_list.size();
                 EdgeIterator oldCapacity = edge_list.capacity();
                 // make sure there is enough space at the end
