@@ -110,7 +110,7 @@ SegmentLookupTable readSegmentValues(const std::vector<std::string> &paths)
                     else if (speed_str[0] == 'H' || speed_str[0] == 'h')
                     {
                         // Level token, e.g. "HG<level>" (also tolerates "HG <level>"): skip the
-                        // leading letters/whitespace and parse the trailing integer level (1..5).
+                        // leading letters/whitespace and parse the trailing integer level (0..5).
                         speed_source.operation = SpeedSource::LEVEL;
                         std::size_t i = 0;
                         while (i < speed_str.size() &&
